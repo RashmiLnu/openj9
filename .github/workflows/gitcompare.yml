@@ -36,7 +36,7 @@ jobs:
           GOOD_BUILD=$(echo "$GOOD_BUILD" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
           BAD_BUILD=$(echo "$BAD_BUILD" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
 
-          echo "✅ Good build: $GOOD_BUILD"
+          echo "✅ Good build: $GOOD_BUILD "
           echo "✅ Bad build: $BAD_BUILD"
 
           {
