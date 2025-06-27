@@ -1,0 +1,134 @@
+name: GitCompare
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  parse-comment:
+    if: startsWith(github.event.comment.body, '.ch_gitcompare')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    outputs:
+      good_build: ${{ steps.parse.outputs.good_build }}
+      bad_build: ${{ steps.parse.outputs.bad_build }}
+    steps:
+      - name: Parse comment
+        id: parse
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          echo "Comment body: $COMMENT_BODY"
+
+          COMMENT=${COMMENT_BODY#.ch_gitcompare}
+
+          if [[ $COMMENT =~ --good_build[[:space:]]+(.*)[[:space:]]+--bad_build[[:space:]]+(.*) ]]; then
+            GOOD_BUILD="${BASH_REMATCH[1]}"
+            BAD_BUILD="${BASH_REMATCH[2]}"
+          else
+            echo "❌ Invalid format. Use: .ch_gitcompare --good_build <sha> --bad_build <sha>"
+            exit 1
+          fi
+
+          GOOD_BUILD=$(echo "$GOOD_BUILD" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+          BAD_BUILD=$(echo "$BAD_BUILD" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+
+          echo "✅ Good build: $GOOD_BUILD"
+          echo "✅ Bad build: $BAD_BUILD"
+
+          {
+            echo "good_build<<EOF"
+            echo "$GOOD_BUILD"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          {
+            echo "bad_build<<EOF"
+            echo "$BAD_BUILD"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+  compare:
+    needs: parse-comment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install requirements
+        run: pip install PyGithub
+
+      - name: Run Suspect Commit Finder
+        env:
+          GOOD_BUILD: ${{ needs.parse-comment.outputs.good_build }}
+          BAD_BUILD: ${{ needs.parse-comment.outputs.bad_build }}
+        run: |
+          python3 <<EOF
+          import subprocess
+          import os
+
+          good_sha = os.environ["GOOD_BUILD"]
+          bad_sha = os.environ["BAD_BUILD"]
+          failure_keywords = [".java"]  # Can be improved to include stack trace logic later
+
+          def get_commits_between(good, bad):
+              cmd = ["git", "log", "--pretty=format:%H", f"{good}..{bad}"]
+              result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
+              return result.stdout.strip().splitlines()
+
+          def get_files_changed(commit):
+              cmd = ["git", "show", "--name-only", "--pretty=format:", commit]
+              result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
+              return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+          def find_suspects(commits, keywords):
+              suspects = []
+              for sha in commits:
+                  files = get_files_changed(sha)
+                  if any(any(keyword in f for keyword in keywords) for f in files):
+                      suspects.append((sha, files))
+              return suspects
+
+          commits = get_commits_between(good_sha, bad_sha)
+          suspects = find_suspects(commits, failure_keywords)
+
+          with open("comment.md", "w") as f:
+              f.write("## 🔍 GitCompare Suspect Commits\n\n")
+              if not suspects:
+                  f.write("✅ No matching commits found between the provided SHAs.\n")
+              else:
+                  for sha, files in suspects:
+                      f.write(f"- **Commit**: [`{sha}`](https://github.com/eclipse-openj9/openj9/commit/{sha})\n")
+                      f.write(f"  - Changed files: {', '.join(files)}\n\n")
+          EOF
+
+      - name: Comment on PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          python3 <<EOF
+          from github import Github
+          import os
+
+          with open("comment.md", "r", encoding="utf-8") as f:
+              comment_body = f.read()
+
+          g = Github(os.environ["GITHUB_TOKEN"])
+          repo = g.get_repo(os.environ["GITHUB_REPOSITORY"])
+          issue = repo.get_issue(int(os.environ["ISSUE_NUMBER"]))
+          issue.create_comment(comment_body)
+          EOF
