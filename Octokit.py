@@ -1,6 +1,6 @@
 import requests
 
-GITHUB_TOKEN = "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"  # Replace with your actual token
+GITHUB_TOKEN = ""  # Replace with your actual token
 OWNER = "eclipse-openj9"
 REPO = "openj9"
 COMMIT_SHA = "10fbdc14673072822e1e6c3ba75768243561e673"  # Example SHA
