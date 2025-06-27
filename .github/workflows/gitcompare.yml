@@ -8,13 +8,16 @@ jobs:
   parse-comment:
     if: startsWith(github.event.comment.body, '.ch_gitcompare')
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       issues: write
       pull-requests: write
+
     outputs:
       good_build: ${{ steps.parse.outputs.good_build }}
       bad_build: ${{ steps.parse.outputs.bad_build }}
+
     steps:
       - name: Parse comment
         id: parse
@@ -54,13 +57,18 @@ jobs:
   compare:
     needs: parse-comment
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       issues: write
       pull-requests: write
+
     steps:
-      - name: Checkout repo
+      - name: Checkout upstream OpenJ9 repo
         uses: actions/checkout@v4
+        with:
+          repository: eclipse-openj9/openj9
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -81,7 +89,7 @@ jobs:
 
           good_sha = os.environ["GOOD_BUILD"]
           bad_sha = os.environ["BAD_BUILD"]
-          failure_keywords = [".java"]  # Can be improved to include stack trace logic later
+          failure_keywords = [".java"]
 
           def get_commits_between(good, bad):
               cmd = ["git", "log", "--pretty=format:%H", f"{good}..{bad}"]
@@ -114,7 +122,7 @@ jobs:
                       f.write(f"  - Changed files: {', '.join(files)}\n\n")
           EOF
 
-      - name: Comment on PR
+      - name: Comment on PR or Issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
